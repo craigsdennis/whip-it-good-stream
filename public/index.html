@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Cloudflare WHIP Ingest with Channel Creation (Pure JavaScript)</title>
+  <style>
+    body {
+      font-family: sans-serif;
+      margin: 20px;
+    }
+    label {
+      display: block;
+      margin: 0.5rem 0 0.25rem;
+      font-weight: 600;
+    }
+    input {
+      padding: 0.25rem;
+      margin-bottom: 0.5rem;
+      width: 300px;
+      display: block;
+    }
+    button {
+      margin-right: 0.5rem;
+      padding: 0.5rem 1rem;
+      cursor: pointer;
+      border: 1px solid #333;
+      background: #eee;
+    }
+    button:hover {
+      background: #ddd;
+    }
+    video {
+      display: block;
+      margin-top: 1rem;
+      background: #000;
+    }
+    .link-container {
+      margin-top: 1rem;
+    }
+    a#whepLink {
+      display: none;
+      color: blue;
+      text-decoration: underline;
+    }
+  </style>
+</head>
+<body>
+
+  <h1>Cloudflare WHIP Ingest with Channel Creation</h1>
+  <p>
+    Enter your <strong>name</strong> and <strong>title</strong> below, then click <strong>Create Channel & Start Publish</strong>.
+    This will POST to <code>/api/channels</code> on your server with the given <em>name</em> and <em>title</em>, which should return
+    a JSON response containing both a <code>whipUrl</code> and a <code>whepUrl</code>.
+  </p>
+
+  <label for="userName">Name:</label>
+  <input type="text" id="userName" placeholder="John Doe" />
+
+  <label for="streamTitle">Title:</label>
+  <input type="text" id="streamTitle" placeholder="My Awesome Stream" />
+
+  <div>
+    <button id="startBtn">Create Channel & Start Publish</button>
+    <button id="stopBtn">Stop Publish</button>
+  </div>
+
+  <video id="localVideo" width="640" height="360" autoplay playsinline muted></video>
+
+  <div class="link-container">
+    <!-- Link to open WHEP page in new window -->
+    <a id="whepLink" href="#" target="_blank">Open WHEP Player in a new window</a>
+  </div>
+
+  <script>
+    let localStream = null;
+    let pc = null;
+
+    // Example function to POST to /api/channels with name & title
+    // expecting JSON: { whipUrl, whepUrl }
+    async function createChannel(name, title) {
+      const response = await fetch('/api/channels', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ name, title }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Failed to create channel: ${response.status} ${response.statusText}`);
+      }
+
+      const data = await response.json();
+      if (!data.whipUrl || !data.whepUrl) {
+        throw new Error('Server did not return both whipUrl and whepUrl.');
+      }
+      return data;
+    }
+
+    async function startPublish() {
+      const userName = document.getElementById('userName').value.trim();
+      const streamTitle = document.getElementById('streamTitle').value.trim();
+
+      if (!userName || !streamTitle) {
+        alert('Please provide both name and title.');
+        return;
+      }
+
+      try {
+        // 1. Create channel on the server to get the WHIP & WHEP URLs
+        const { whipUrl, whepUrl } = await createChannel(userName, streamTitle);
+        console.log('WHIP URL:', whipUrl);
+        console.log('WHEP URL:', whepUrl);
+
+        // 2. Generate a link that opens the WHEP page in a new window with url-encoded param
+        const linkElem = document.getElementById('whepLink');
+        const encodedWhep = encodeURIComponent(whepUrl);
+        linkElem.href = `/whep?whepUrl=${encodedWhep}`;
+        linkElem.style.display = 'inline';
+
+        // 3. Get local media
+        localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+        document.getElementById('localVideo').srcObject = localStream;
+
+        // 4. Create peer connection
+        pc = new RTCPeerConnection({
+          iceServers: [
+            { urls: 'stun:stun1.l.google.com:19302' },
+            { urls: 'stun:stun2.l.google.com:19302' }
+          ]
+        });
+
+        // 5. Add local tracks
+        localStream.getTracks().forEach(track => {
+          pc.addTrack(track, localStream);
+        });
+
+        // 6. Create offer
+        const offer = await pc.createOffer({ offerToReceiveAudio: false, offerToReceiveVideo: false });
+        await pc.setLocalDescription(offer);
+
+        // 7. Send offer SDP to WHIP endpoint
+        const response = await fetch(whipUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/sdp'
+          },
+          body: offer.sdp
+        });
+        if (!response.ok) {
+          throw new Error(`WHIP request failed: ${response.status} ${response.statusText}`);
+        }
+
+        // 8. Parse the answer
+        const answerSDP = await response.text();
+        const answerDesc = new RTCSessionDescription({ type: 'answer', sdp: answerSDP });
+        await pc.setRemoteDescription(answerDesc);
+
+        console.log('Publishing to Cloudflare Stream (WHIP) started.');
+      } catch (error) {
+        console.error('Error starting publish:', error);
+        alert(`Error: ${error.message}`);
+        stopPublish();
+      }
+    }
+
+    function stopPublish() {
+      if (localStream) {
+        localStream.getTracks().forEach(track => track.stop());
+        localStream = null;
+      }
+      if (pc) {
+        pc.close();
+        pc = null;
+      }
+      document.getElementById('localVideo').srcObject = null;
+      console.log('Publishing stopped.');
+    }
+
+    document.getElementById('startBtn').addEventListener('click', startPublish);
+    document.getElementById('stopBtn').addEventListener('click', stopPublish);
+  </script>
+
+</body>
+</html>

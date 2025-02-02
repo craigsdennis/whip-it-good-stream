@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Cloudflare WHEP Playback Demo (Pure JavaScript)</title>
+  <style>
+    body {
+      font-family: sans-serif;
+      margin: 20px;
+    }
+    label {
+      display: inline-block;
+      margin-bottom: 0.5rem;
+    }
+    input {
+      padding: 0.25rem;
+      margin-left: 0.5rem;
+      width: 300px;
+    }
+    button {
+      margin-right: 0.5rem;
+      padding: 0.5rem 1rem;
+      cursor: pointer;
+      border: 1px solid #333;
+      background: #eee;
+    }
+    button:hover {
+      background: #ddd;
+    }
+    video {
+      display: block;
+      margin-top: 1rem;
+      background: #000;
+      width: 640px;
+      height: 360px;
+    }
+  </style>
+</head>
+<body>
+
+  <h1>Cloudflare WHEP Playback Demo (Pure JavaScript)</h1>
+  <p>
+    Enter your WHEP endpoint below and press <strong>Start Play</strong> to connect.
+    Or pass your WHEP URL as a <code>?whepUrl=&lt;URL&gt;</code> query parameter.
+    This page will <strong>automatically start playback</strong> if the query parameter is present.
+    This is convenient for loading as a <strong>Browser Source in OBS</strong>.
+  </p>
+
+  <label>
+    WHEP Endpoint URL:
+    <input type="text" id="whepUrl" placeholder="https://live.cloudflarestream.com/..." />
+  </label>
+
+  <div>
+    <button id="startBtn">Start Play</button>
+    <button id="stopBtn">Stop Play</button>
+  </div>
+
+  <video id="remoteVideo" autoplay playsinline controls></video>
+
+  <script>
+    let pc = null;
+
+    // Grab "whepUrl" from query string if present.
+    // e.g. https://example.com/whep.html?whepUrl=https://live.cloudflarestream.com/xxx
+    // Autostart playback if found.
+    window.addEventListener('DOMContentLoaded', async () => {
+      const params = new URLSearchParams(window.location.search);
+      const prefilledUrl = params.get('whepUrl');
+      if (prefilledUrl) {
+        document.getElementById('whepUrl').value = prefilledUrl;
+        await startPlay();
+      }
+    });
+
+    async function startPlay() {
+      const whepUrl = document.getElementById('whepUrl').value.trim();
+      if (!whepUrl) {
+        alert('Please provide a valid WHEP endpoint URL!');
+        return;
+      }
+
+      try {
+        // 1. Create RTCPeerConnection
+        pc = new RTCPeerConnection({
+          iceServers: [
+            { urls: 'stun:stun1.l.google.com:19302' },
+            { urls: 'stun:stun2.l.google.com:19302' }
+          ]
+        });
+
+        // 2. When a track is received, attach it to the video
+        pc.addEventListener('track', (event) => {
+          console.log('Remote track received:', event);
+          const [remoteStream] = event.streams;
+          document.getElementById('remoteVideo').srcObject = remoteStream;
+        });
+
+        // 3. Create an SDP offer (for receive-only connection)
+        const offer = await pc.createOffer({
+          offerToReceiveAudio: true,
+          offerToReceiveVideo: true
+        });
+        await pc.setLocalDescription(offer);
+
+        // 4. POST the SDP offer to the WHEP endpoint
+        const response = await fetch(whepUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/sdp'
+          },
+          body: offer.sdp
+        });
+
+        if (!response.ok) {
+          throw new Error(`WHEP request failed: ${response.status} ${response.statusText}`);
+        }
+
+        // 5. Get the SDP answer from Cloudflare
+        const answerSDP = await response.text();
+        const answerDesc = new RTCSessionDescription({ type: 'answer', sdp: answerSDP });
+        await pc.setRemoteDescription(answerDesc);
+
+        console.log('Playback started (WHEP).');
+      } catch (error) {
+        console.error('Error starting playback:', error);
+        alert(`Error: ${error.message}`);
+        stopPlay();
+      }
+    }
+
+    function stopPlay() {
+      const video = document.getElementById('remoteVideo');
+
+      if (pc) {
+        pc.close();
+        pc = null;
+      }
+
+      // Reset the video element
+      video.srcObject = null;
+
+      console.log('Playback stopped.');
+    }
+
+    document.getElementById('startBtn').addEventListener('click', startPlay);
+    document.getElementById('stopBtn').addEventListener('click', stopPlay);
+  </script>
+
+</body>
+</html>
