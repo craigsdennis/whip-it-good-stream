@@ -118,24 +118,33 @@
         linkElem.href = `/whep?whepUrl=${encodedWhep}`;
         linkElem.style.display = 'inline';
 
-        // 3. Get local media
-        localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+        // 3. Get local media (with explicit audio constraints for clarity)
+        // You can request higher resolution by adjusting width/height if your camera supports it.
+        localStream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            width: { ideal: 1280 },
+            height: { ideal: 720 }
+          },
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true
+          }
+        });
         document.getElementById('localVideo').srcObject = localStream;
 
-        // 4. Create peer connection
+        // 4. Create peer connection w/ Cloudflare STUN
         pc = new RTCPeerConnection({
           iceServers: [
-            { urls: 'stun:stun1.l.google.com:19302' },
-            { urls: 'stun:stun2.l.google.com:19302' }
+            { urls: 'stun:stun.cloudflare.com:3478' }
           ]
         });
 
-        // 5. Add local tracks
+        // 5. Add local tracks (video + audio)
         localStream.getTracks().forEach(track => {
           pc.addTrack(track, localStream);
         });
 
-        // 6. Create offer
+        // 6. Create offer (sending only, no receive)
         const offer = await pc.createOffer({ offerToReceiveAudio: false, offerToReceiveVideo: false });
         await pc.setLocalDescription(offer);
 

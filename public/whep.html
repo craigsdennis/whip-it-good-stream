@@ -2,84 +2,66 @@
 <html>
 <head>
   <meta charset="utf-8" />
-  <title>Cloudflare WHEP Playback Demo (Pure JavaScript)</title>
+  <title>Cloudflare WHEP Fullscreen Playback</title>
   <style>
-    body {
-      font-family: sans-serif;
-      margin: 20px;
-    }
-    label {
-      display: inline-block;
-      margin-bottom: 0.5rem;
-    }
-    input {
-      padding: 0.25rem;
-      margin-left: 0.5rem;
-      width: 300px;
-    }
-    button {
-      margin-right: 0.5rem;
-      padding: 0.5rem 1rem;
-      cursor: pointer;
-      border: 1px solid #333;
-      background: #eee;
-    }
-    button:hover {
-      background: #ddd;
-    }
-    video {
-      display: block;
-      margin-top: 1rem;
+    /* Make the page fill the entire browser window */
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
       background: #000;
-      width: 640px;
-      height: 360px;
+      overflow: hidden; /* Hide scrollbars if any */
+    }
+
+    /* Fullscreen video */
+    #remoteVideo {
+      width: 100%;
+      height: 100%;
+      object-fit: cover; /* fill while preserving aspect ratio, cropping if needed */
+      display: block;
+    }
+
+    /* Optional: A small overlay button for stopping playback */
+    #stopBtn {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      padding: 0.5rem 1rem;
+      border: none;
+      background: rgba(255, 255, 255, 0.3);
+      color: #fff;
+      cursor: pointer;
+      font-size: 14px;
+    }
+    #stopBtn:hover {
+      background: rgba(255, 255, 255, 0.5);
     }
   </style>
 </head>
 <body>
 
-  <h1>Cloudflare WHEP Playback Demo (Pure JavaScript)</h1>
-  <p>
-    Enter your WHEP endpoint below and press <strong>Start Play</strong> to connect.
-    Or pass your WHEP URL as a <code>?whepUrl=&lt;URL&gt;</code> query parameter.
-    This page will <strong>automatically start playback</strong> if the query parameter is present.
-    This is convenient for loading as a <strong>Browser Source in OBS</strong>.
-  </p>
-
-  <label>
-    WHEP Endpoint URL:
-    <input type="text" id="whepUrl" placeholder="https://live.cloudflarestream.com/..." />
-  </label>
-
-  <div>
-    <button id="startBtn">Start Play</button>
-    <button id="stopBtn">Stop Play</button>
-  </div>
-
   <video id="remoteVideo" autoplay playsinline controls></video>
+
+  <button id="stopBtn">Stop</button>
 
   <script>
     let pc = null;
 
-    // Grab "whepUrl" from query string if present.
-    // e.g. https://example.com/whep.html?whepUrl=https://live.cloudflarestream.com/xxx
-    // Autostart playback if found.
+    // On DOM load, parse the whepUrl from query string & autostart if found.
     window.addEventListener('DOMContentLoaded', async () => {
       const params = new URLSearchParams(window.location.search);
       const prefilledUrl = params.get('whepUrl');
-      if (prefilledUrl) {
-        document.getElementById('whepUrl').value = prefilledUrl;
-        await startPlay();
-      }
-    });
 
-    async function startPlay() {
-      const whepUrl = document.getElementById('whepUrl').value.trim();
-      if (!whepUrl) {
-        alert('Please provide a valid WHEP endpoint URL!');
+      if (!prefilledUrl) {
+        alert('No WHEP URL provided! Use ?whepUrl=... in the URL.');
         return;
       }
 
+      await startPlay(prefilledUrl);
+    });
+
+    async function startPlay(whepUrl) {
       try {
         // 1. Create RTCPeerConnection
         pc = new RTCPeerConnection({
@@ -91,7 +73,6 @@
 
         // 2. When a track is received, attach it to the video
         pc.addEventListener('track', (event) => {
-          console.log('Remote track received:', event);
           const [remoteStream] = event.streams;
           document.getElementById('remoteVideo').srcObject = remoteStream;
         });
@@ -139,11 +120,10 @@
 
       // Reset the video element
       video.srcObject = null;
-
       console.log('Playback stopped.');
     }
 
-    document.getElementById('startBtn').addEventListener('click', startPlay);
+    // Stop button to end playback
     document.getElementById('stopBtn').addEventListener('click', stopPlay);
   </script>
 
